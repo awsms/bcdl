@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"html"
 	"io"
@@ -319,10 +320,20 @@ func getEmailLink(releaseLink string) string {
 	releaseType := gjson.Get(dataEmbed, "tralbum_param.name").String()
 
 	// Set email and clear inbox (manually doing request since soup doesn't support DELETE requests)
-	emailAddr := "bcdl-" + strconv.Itoa(rand.Intn(10000)) + "@getnada.com"
-	req, _ := http.NewRequest("DELETE", "https://getnada.com/api/v1/inboxes/"+emailAddr, nil)
-	Client := &http.Client{}
-	Client.Do(req)
+	mailHost := "https://www.1secmail.com/api/v1/"
+	salt := "bcdl-" + strconv.Itoa(rand.Intn(10000))
+	rawDomainsList, _ := soup.Get(mailHost + "?action=getDomainList")
+	var domains []string
+	if err := json.Unmarshal([]byte(rawDomainsList), &domains); err != nil {
+		fmt.Println("Error while fetching available domain names:", err)
+	}
+	randomDomainIndex := rand.Intn(len(domains))
+	domain := domains[randomDomainIndex]
+	emailAddr := salt + "@" + domain
+	// emailAddr := "bcdl-" + strconv.Itoa(rand.Intn(10000)) + "@1secmail.com"
+	// req, _ := http.NewRequest("DELETE", mailHost+"?action=getMessages"+"&login="+salt+"&domain="+domain, nil)
+	// Client := &http.Client{}
+	// Client.Do(req)
 
 	baseURL, _ := url.Parse(releaseLink)
 
@@ -341,8 +352,8 @@ func getEmailLink(releaseLink string) string {
 	// Wait until the email has been received. Checks every second.
 	var UID string
 	for UID == "" {
-		inboxData, _ := soup.Get("https://getnada.com/api/v1/inboxes/" + emailAddr)
-		UID = gjson.Get(inboxData, "msgs.0.uid").String()
+		inboxData, _ := soup.Get(mailHost + "?action=getMessages" + "&login=" + salt + "&domain=" + domain)
+		UID = gjson.Get(inboxData, "0.id").String()
 		for _, icon := range []string{"-", "\\", "|", "/"} {
 			color.New(color.FgCyan).Print("\r>>> WAITING " + icon)
 			time.Sleep(250 * time.Millisecond)
@@ -350,8 +361,8 @@ func getEmailLink(releaseLink string) string {
 	}
 	fmt.Println()
 
-	// Get content of the email
-	emailData, _ := soup.Get("https://getnada.com/api/v1/messages/html/" + UID)
+	emailRaw, _ := soup.Get(mailHost + "?action=readMessage" + "&login=" + salt + "&domain=" + domain + "&id=" + UID)
+	emailData := gjson.Get(emailRaw, "body").String()
 	emailContentSoup := soup.HTMLParse(emailData)
 	return emailContentSoup.Find("a").Attrs()["href"]
 }
